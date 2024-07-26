@@ -621,6 +621,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -679,6 +680,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -697,6 +699,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -715,6 +718,7 @@ class TLEdgeIn(
     b.mask    := mask
     b.data    := data
     b.corrupt := corrupt
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -730,6 +734,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -745,6 +750,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    b.hit     := true.B
     (legal, b)
   }
 
@@ -760,6 +766,7 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    b.hit     := true.B
     (legal, b)
   }
 

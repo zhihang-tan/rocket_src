@@ -182,6 +182,7 @@ class HellaCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
   val ordered = Input(Bool())
   val perf = Input(new HellaCachePerfEvents())
   val fake_resp = Output(Bool())
+  val l2hit = Input(Bool())
 
   val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?
   val clock_enabled = Input(Bool()) // is D$ currently being clocked?

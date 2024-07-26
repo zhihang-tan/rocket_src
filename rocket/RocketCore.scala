@@ -972,6 +972,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   dontTouch(div.io)
 
 //dcache miss counter
+  val l2hit = io.dmem.l2hit
   val counter = RegInit(0.U(32.W))
   val miss_sig = WireInit(false.B)
   val miss_sig2 = WireInit(false.B)
@@ -1005,6 +1006,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 }
 printf(p"Total DCache miss events: ${miss_events}\n")
 printf(p"Total DCache miss cycles: ${total_counter}\n")
+
+  dontTouch(l2hit)
+
 
   //blocking cache fake resp signal
   io.dmem.fake_resp := (ex_reg_pc === "h800002A8".U(32.W)) && (dcache_blocked === true.B)

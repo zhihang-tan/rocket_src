@@ -72,6 +72,8 @@ class HellaCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       io.requestor(i).clock_enabled := io.mem.clock_enabled
       resp.bits := io.mem.resp.bits
       resp.bits.tag := io.mem.resp.bits.tag >> log2Up(n)
+      io.requestor(i).l2hit := io.mem.l2hit
+
 
       io.requestor(i).replay_next := io.mem.replay_next
 

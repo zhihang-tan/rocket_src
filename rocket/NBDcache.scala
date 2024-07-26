@@ -956,6 +956,12 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   wb.io.data_resp := s2_data_corrected
   TLArbiter.lowest(edge, tl_out.c, wb.io.release, prober.io.rep)
 
+  //===== rrunahead: Start ====//
+  val l2_hit = Wire(chiselTypeOf(tl_out.b.bits.hit))
+  l2_hit := tl_out.b.bits.hit
+  dontTouch(l2_hit)
+  //===== rrunahead: Start ====//
+
   // store->load bypassing
   val s4_valid = RegNext(s3_valid, false.B)
   val s4_req = RegEnable(s3_req, s3_valid && metaReadArb.io.out.valid)
