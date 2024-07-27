@@ -184,6 +184,12 @@ class HellaCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
   val fake_resp = Output(Bool())
   val l2hit = Input(Bool())
 
+/*runahead code begin*/
+  val mshr_l2miss_tag = Input(UInt(7.W))
+  val mshr_state = Input(Vec(2, Bits(3.W)))
+  val mshr_flag = Input(Bool())
+/*runahead code end*/
+
   val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?
   val clock_enabled = Input(Bool()) // is D$ currently being clocked?
 }

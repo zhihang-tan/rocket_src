@@ -182,6 +182,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       ("DTLB miss", () => io.dmem.perf.tlbMiss),
       ("L2 TLB miss", () => io.ptw.perf.l2miss)))))
 
+/*runahead code begin*/
+      dontTouch(io.dmem.perf)
+/*runahead code end*/
 
     // //L2TLB miss counter
     // val counter_tlb = RegInit(0.U(32.W))
@@ -300,6 +303,21 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   val take_pc_mem_wb = take_pc_wb || take_pc_mem
   val take_pc = take_pc_mem_wb
+  /*runahead code begin*/
+  val runahead_tag = RegInit(0.U(5.W))
+  /*runahead code end*/
+
+  /*runahead code begin*/
+  val rcu = Module(new RCU(RCU_Params(xLen)))
+  val db_flag = Reg(Bool())
+  val runahead_flag = Wire(Bool())
+
+  runahead_flag := rcu.io.runahead_flag
+  dontTouch(runahead_flag)
+  dontTouch(db_flag)
+  rcu.io.ipc := wb_reg_pc
+  rcu.io.wb_valid := db_flag
+  /*runahead code end*/
 
   // decode stage
   val ibuf = Module(new IBuf)
@@ -822,6 +840,17 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  Mux(wb_ctrl.mul, mul.map(_.io.resp.bits.data).getOrElse(wb_reg_wdata),
                  wb_reg_wdata))))
+  /*runahead code beign*/
+  for (i <- 0 until 31) {
+        rcu.io.rf_in(i) := rf.read(i.U)
+      }
+  when(db_flag){
+  for (j <- 0 until 31) {
+    rf.write(j.U, rcu.io.rf_out(j))
+    }
+}
+  /*runahead code end*/
+  
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
 
   // hook up control/status regfile
@@ -938,6 +967,71 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     checkHazards(fp_hazard_targets, fp_sboard.read _)
   } else false.B
 
+  /*runahead code beign*/
+  val s_idle :: s_runahead :: s_pass :: s_inv :: s_exit :: Nil = Enum(5)
+  val runahead_state = RegInit(s_idle)
+  val runahead_enter = id_sboard_hazard && !io.dmem.l2hit && 
+                    (id_raddr1 === io.dmem.mshr_l2miss_tag(6, 2) || 
+                    id_raddr2 === io.dmem.mshr_l2miss_tag(6, 2) || 
+                    id_waddr === io.dmem.mshr_l2miss_tag(6, 2)) &&
+                    (io.dmem.mshr_l2miss_tag =/= 0.U) &&
+                    io.dmem.mshr_flag
+  val s1_runahead_posedge = RegNext(runahead_enter, init = false.B)
+  val s2_runahead_posedge = RegNext(s1_runahead_posedge,init = false.B)
+  val runahead_posedge = !s2_runahead_posedge & s1_runahead_posedge
+  rcu.io.l2miss := runahead_posedge
+
+  // when(runahead_state === s_runahead && runahead_posedge) {
+  //   runahead_state := s_inv
+  // } .else
+  when(runahead_posedge) {
+    runahead_tag := io.dmem.mshr_l2miss_tag(6, 2) 
+    runahead_state := s_runahead
+  } 
+  when(db_flag) {
+    runahead_state := s_pass
+  } 
+  // when(io.dmem.mshr_state(1) > 0.U && runahead_state === s_runahead) {
+  //     runahead_state := s_inv
+  // }
+   when(runahead_state === s_runahead) {
+    db_flag := io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag
+
+  } .otherwise {
+    db_flag := false.B
+  }
+  when(runahead_state === s_pass) {
+    runahead_state := s_exit
+  }
+  when(runahead_state === s_inv) {
+    runahead_state := s_exit
+  }
+  when(runahead_state === s_exit) {
+    runahead_state := s_idle
+  }
+
+  dontTouch(io.dmem.l2hit)
+  dontTouch(runahead_enter)
+  dontTouch(runahead_posedge)
+  dontTouch(id_ex_hazard)
+  dontTouch(id_mem_hazard)
+  dontTouch(id_wb_hazard)
+  // dontTouch(sboard)
+  /*runahead code end*/
+
+  /*runahead code begin*/
+  for (i <- 0 until 31) {
+        rcu.io.sb_in(i) := sboard.read(i.U).asUInt()
+      }
+    when(db_flag){
+      for (j <- 0 until 31) {
+        sboard.clear(rcu.io.sb_out(j) === false.B || 
+        (rcu.io.sb_out(j) === true.B && (j.U === runahead_tag)) ,j.U) //reset the sb_value that is resp_waddr
+        sboard.set(rcu.io.sb_out(j) === true.B && (j.U =/= runahead_tag) ,j.U) 
+      }
+    }
+  /*runahead code end*/
+
   val dcache_blocked = {
     // speculate that a blocked D$ will unblock the cycle after a Grant
     val blocked = Reg(Bool())
@@ -962,6 +1056,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     io.traceStall
   ctrl_killd := !ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt
 
+  dontTouch(id_raddr1)
+  dontTouch(id_raddr2)
+  dontTouch(id_waddr)
   dontTouch(ctrl_stalld)
   dontTouch(id_ex_hazard)
   dontTouch(id_mem_hazard)
@@ -972,7 +1069,6 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   dontTouch(div.io)
 
 //dcache miss counter
-  val l2hit = io.dmem.l2hit
   val counter = RegInit(0.U(32.W))
   val miss_sig = WireInit(false.B)
   val miss_sig2 = WireInit(false.B)
@@ -1007,8 +1103,37 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 printf(p"Total DCache miss events: ${miss_events}\n")
 printf(p"Total DCache miss cycles: ${total_counter}\n")
 
-  dontTouch(l2hit)
+  val l2counter = RegInit(0.U(32.W))
+  val l2miss_sig = WireInit(false.B)
+  val l2miss_detected = RegInit(false.B)
+  val l2miss_events = RegInit(0.U(32.W))
+  val l2total_counter = RegInit(0.U(32.W))
+  l2miss_sig := (wb_dcache_miss) || (dcache_blocked === true.B) //&& id_ctrl.mem_cmd === M_XRD //if load miss?
 
+  when(reset.asBool()) {
+    l2counter := 0.U
+    l2miss_detected := false.B
+    l2miss_events := 0.U // 重置miss事件计数器
+}.otherwise {
+    when(l2miss_sig) {
+        // 检测到miss
+        when(!l2miss_detected) {
+            l2miss_detected := true.B
+        }
+        l2counter := l2counter + 4.U
+    }.elsewhen(l2miss_detected) {
+        // miss信号从高变低
+        when(l2counter > 50.U) {
+            printf(p"l2Cache miss lasted for ${l2counter} cycles\n")
+            l2miss_events := l2miss_events + 1.U // 当miss的周期大于3时才增加miss事件计数
+        }
+        l2total_counter := l2total_counter + l2counter // 累计 counter 值到 total_counter
+        l2counter := 0.U
+        l2miss_detected := false.B
+    }
+}
+printf(p"Total l2Cache miss events: ${l2miss_events}\n")
+printf(p"Total l2Cache miss cycles: ${l2total_counter}\n")
 
   //blocking cache fake resp signal
   io.dmem.fake_resp := (ex_reg_pc === "h800002A8".U(32.W)) && (dcache_blocked === true.B)
@@ -1017,8 +1142,10 @@ printf(p"Total DCache miss cycles: ${total_counter}\n")
   io.imem.req.bits.speculative := !take_pc_wb
   io.imem.req.bits.pc :=
     Mux(wb_xcpt || csr.io.eret, csr.io.evec, // exception or [m|s]ret
+    Mux(runahead_posedge, mem_reg_pc, // exception or [m|s]ret
+    Mux(db_flag, rcu.io.opc, // exception or [m|s]ret
     Mux(replay_wb,              wb_reg_pc,   // replay
-                                mem_npc))    // flush or branch misprediction
+                                mem_npc))))    // flush or branch misprediction
   io.imem.flush_icache := wb_reg_valid && wb_ctrl.fence_i && !io.dmem.s2_nack
   io.imem.might_request := {
     imem_might_request_reg := ex_pc_valid || mem_pc_valid || io.ptw.customCSRs.disableICacheClockGate
