@@ -301,6 +301,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 /*runahead code begin*/
   val wb_rh_load = Reg(Bool())
   val wb_rh_store = Reg(Bool())
+  val db_flag = Reg(Bool())
+  val runahead_posedge = Reg(Bool())
 /*runahead code end*/
   val wb_reg_mem_size = Reg(UInt())
   val wb_reg_hls_or_dv = Reg(Bool())
@@ -314,20 +316,19 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_reg_wphit           = Reg(Vec(nBreakpoints, Bool()))
 
   val take_pc_mem_wb = take_pc_wb || take_pc_mem
-  val take_pc = take_pc_mem_wb
+  val take_pc = take_pc_mem_wb || runahead_posedge || db_flag
   /*runahead code begin*/
-  val runahead_tag = RegInit(0.U(5.W))
+  val runahead_tag = RegInit(0.U(7.W))
   /*runahead code end*/
 
   /*runahead code begin*/
   val rcu = Module(new RCU(RCU_Params(xLen)))
-  val db_flag = Reg(Bool())
   val runahead_flag = Wire(Bool())
 
   runahead_flag := rcu.io.runahead_flag
   dontTouch(runahead_flag)
   dontTouch(db_flag)
-  rcu.io.ipc := wb_reg_pc
+  // rcu.io.ipc := ibuf.io.pc
   rcu.io.wb_valid := db_flag
   /*runahead code end*/
 
@@ -338,6 +339,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val id_inst = id_expanded_inst.map(_.bits)
   ibuf.io.imem <> io.imem.resp
   ibuf.io.kill := take_pc
+  /*runahead code begin*/
+  rcu.io.ipc := ibuf.io.pc
+  /*runahead code end*/
 
   require(decodeWidth == 1 /* TODO */ && retireWidth == decodeWidth)
   require(!(coreParams.useRVE && coreParams.fpu.nonEmpty), "Can't select both RVE and floating-point")
@@ -877,7 +881,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       }
   when(db_flag){
   for (j <- 0 until 31) {
-    rf.write(j.U, rcu.io.rf_out(j))
+    when(j.U =/= runahead_tag(6,2)){
+    rf.write(j.U, rcu.io.rf_out(j))}
+    // val writeAddress = Mux(j.U === runahead_tag(6, 2), 0.U, j.U)
+    // val writeData = Mux(j.U === runahead_tag(6, 2), 0.U, rcu.io.rf_out(j))
+    // rf.write(writeAddress, writeData)
     }
 }
   /*runahead code end*/
@@ -968,26 +976,31 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   sboard.set(wb_set_sboard && wb_wen, wb_waddr)
 
   /*runahead code beign*/
-  val s_idle :: s_runahead :: s_pass :: s_inv :: s_exit :: Nil = Enum(5)
-  val runahead_state = RegInit(s_idle)
+  val s_runahead_wait_req ::s_runahead_wait_resp :: s_runahead :: s_pass :: s_inv :: s_exit :: Nil = Enum(6)
+  val inv_events = RegInit(0.U(3.W))
+  val runahead_state = RegInit(s_runahead_wait_req)
+  val take_pc_mem_wb_reg = RegNext(take_pc_mem_wb)
+  val mshr_l2miss_tag = Mux(io.dmem.mshr_state(1) === 0.U,io.dmem.mshr_tag(0), 0.U)
   val runahead_enter = id_sboard_hazard && !io.dmem.l2hit && 
-                    (id_raddr1 === io.dmem.mshr_l2miss_tag(6, 2) || 
-                    id_raddr2 === io.dmem.mshr_l2miss_tag(6, 2) || 
-                    id_waddr === io.dmem.mshr_l2miss_tag(6, 2)) &&
-                    (io.dmem.mshr_l2miss_tag =/= 0.U) &&
+                    (id_raddr1 === mshr_l2miss_tag(6, 2) || 
+                    id_raddr2 === mshr_l2miss_tag(6, 2) || 
+                    id_waddr === mshr_l2miss_tag(6, 2)) &&
+                    (mshr_l2miss_tag =/= 0.U) &&
                     io.dmem.mshr_flag
-  val s1_runahead_posedge = RegNext(runahead_enter, init = false.B)
+  val s1_runahead_posedge = RegNext(runahead_state === s_runahead, init = false.B)
   val s2_runahead_posedge = RegNext(s1_runahead_posedge,init = false.B)
-  val runahead_posedge = !s2_runahead_posedge & s1_runahead_posedge
+  runahead_posedge := Mux(runahead_state === s_runahead,!s2_runahead_posedge & s1_runahead_posedge,false.B)
+  val s1_reg_reg_io_dmem_req_bits_addr =RegNext(io.dmem.req.bits.addr)
+  val s2_reg_io_dmem_req_bits_addr = RegNext(s1_reg_reg_io_dmem_req_bits_addr)
   /*runahead code end*/
 
   /*runahead invfile beign*/
   val rh_hazard_targets = Seq((id_ctrl.rxs1 && id_raddr1 =/= 0.U, id_raddr1),
                            (id_ctrl.rxs2 && id_raddr2 =/= 0.U, id_raddr2))
   val runahead_posedge_r = RegNext(runahead_posedge, init = false.B)
-  sboard.clear((runahead_flag === true.B) && runahead_posedge_r, runahead_tag)//pretend stall for dependency
+  sboard.clear((runahead_flag === true.B) && runahead_posedge_r, runahead_tag(6,2))//pretend stall for dependency
   val rf_invfile = new Scoreboard(32, true)
-  rf_invfile.set((runahead_flag === true.B) && runahead_posedge_r, runahead_tag)
+  rf_invfile.set((runahead_flag === true.B) && runahead_posedge, runahead_tag(6,2))
   val id_rfinvfile_propogation = checkHazards(rh_hazard_targets, rd => rf_invfile.read(rd) && !id_sboard_clear_bypass(rd))
   rf_invfile.set((runahead_flag === true.B) && id_rfinvfile_propogation, id_waddr) //although invalid, it will still writeback to rf
   rf_invfile.clear((runahead_flag === true.B) && !id_rfinvfile_propogation, id_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
@@ -1100,35 +1113,52 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code beign*/
   rcu.io.l2miss := runahead_posedge
 
-  // when(runahead_state === s_runahead && runahead_posedge) {
-  //   runahead_state := s_inv
-  // } .else
-  when(runahead_posedge) {
-    runahead_tag := io.dmem.mshr_l2miss_tag(6, 2) 
-    runahead_state := s_runahead
-  } 
-  when(db_flag) {
-    runahead_state := s_pass
-  } 
-  // when(io.dmem.mshr_state(1) > 0.U && runahead_state === s_runahead) {
-  //     runahead_state := s_inv
-  // }
-   when(runahead_state === s_runahead) {
-    db_flag := io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag
-
+  when(runahead_state === s_pass && io.dmem.mshr_state(0) === 0.U) {
+    db_flag := io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag(6, 2)
   } .otherwise {
     db_flag := false.B
+  } 
+  when(io.dmem.mshr_state(0) =/= 5.U) {
+    inv_events := 0.U
+  } .elsewhen(runahead_state === s_exit && io.dmem.mshr_state(0) === 5.U) {
+    inv_events := 0.U
+  } .elsewhen(runahead_state === s_runahead_wait_resp && s2_reg_io_dmem_req_bits_addr === io.dmem.resp.bits.addr && io.dmem.mshr_state(0) === 5.U && !io.dmem.resp.valid ) {
+    inv_events := inv_events + 1.U
   }
-  when(runahead_state === s_pass) {
-    runahead_state := s_exit
-  }
-  when(runahead_state === s_inv) {
-    runahead_state := s_exit
-  }
-  when(runahead_state === s_exit) {
-    runahead_state := s_idle
+  when(runahead_state === s_runahead) {
+    runahead_tag := mshr_l2miss_tag
+  }.elsewhen (runahead_state === s_exit) {
+    runahead_tag := 0.U
   }
 
+  when(runahead_state === s_runahead_wait_req && io.dmem.req.valid && io.dmem.mshr_state(0) === 5.U) {
+    runahead_state := s_runahead_wait_resp
+  }
+  when(runahead_state === s_runahead_wait_resp && s2_reg_io_dmem_req_bits_addr === io.dmem.resp.bits.addr && io.dmem.mshr_state(0) === 5.U) {
+    runahead_state := s_runahead_wait_req
+  }
+  when(runahead_state === s_runahead_wait_resp && io.dmem.mshr_state(0) =/=5.U) {
+    runahead_state := s_runahead_wait_req
+  }
+
+  when(runahead_state === s_runahead_wait_req && runahead_enter && !take_pc_mem_wb_reg && !io.dmem.req.valid) {
+    when(inv_events === 0.U) {
+      runahead_state := s_runahead
+    } .otherwise {
+      runahead_state := s_inv
+    }}
+  when(runahead_state === s_runahead && io.dmem.mshr_state(0) === 8.U) {
+    runahead_state := s_pass
+  }
+  when(db_flag && runahead_state === s_pass) {
+    runahead_state := s_exit
+  }
+  when(runahead_state === s_inv && io.dmem.resp.valid) {
+    runahead_state := s_exit
+  }
+  when(runahead_state === s_exit && io.dmem.mshr_state(0) === 5.U) {
+    runahead_state := s_runahead_wait_req
+  }
   dontTouch(io.dmem.l2hit)
   dontTouch(runahead_enter)
   dontTouch(runahead_posedge)
@@ -1148,8 +1178,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     when(db_flag){
       for (j <- 0 until 31) {
         sboard.clear(rcu.io.sb_out(j) === false.B || 
-        (rcu.io.sb_out(j) === true.B && (j.U === runahead_tag)) ,j.U) //reset the sb_value that is resp_waddr
-        sboard.set(rcu.io.sb_out(j) === true.B && (j.U =/= runahead_tag) ,j.U) 
+        (rcu.io.sb_out(j) === true.B && (j.U === runahead_tag(6,2))) ,j.U) //reset the sb_value that is resp_waddr
+        sboard.set(rcu.io.sb_out(j) === true.B && (j.U =/= runahead_tag(6,2)) ,j.U) 
       }
     }
   /*runahead code end*/

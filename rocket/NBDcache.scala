@@ -164,7 +164,7 @@ class MSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCach
     val probe_rdy = Output(Bool())
 
 /*runahead code begin*/
-    val state = Output(UInt(3.W))
+    val state = Output(UInt(4.W))
     val enq_ptr_value = Output(UInt(4.W))
     val deq_ptr_value = Output(UInt(4.W))
 /*runahead code end*/
@@ -347,8 +347,8 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     val replay_next = Output(Bool())
 
 /*runahead code begin*/
-    val mshr_l2miss_tag = Output(UInt(7.W))
-    val mshr_state = Output(Vec(2, Bits(3.W)))
+    val mshr_tag = Output(Vec(2, Bits(7.W)))
+    val mshr_state = Output(Vec(2, Bits(4.W)))
     val mshr_flag = Output(Bool())
 /*runahead code end*/
   })
@@ -364,7 +364,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
   when (sdq_enq) { sdq(sdq_alloc_id) := io.req.bits.data }
 
 /*runahead code begin*/
-  val state = Wire(Vec(cfg.nMSHRs, Bits(3.W)))
+  val state = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
   val mshr_tag = Wire(Vec(cfg.nMSHRs, Bits(7.W)))
   val enq_ptr_value = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
   val deq_ptr_value = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
@@ -435,11 +435,12 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
 
   /*runahead code begin*/
   io.mshr_state := state
+  io.mshr_tag := mshr_tag
   val ptr_value = Mux((enq_ptr_value(0) - deq_ptr_value(0)) < 0.U, ~(enq_ptr_value(0) - deq_ptr_value(0)) + 1.U ,(enq_ptr_value(0) - deq_ptr_value(0)))
   dontTouch(ptr_value)
   //这里只考虑了一个load的情况 need to change 
   io.mshr_flag :=  (ptr_value === 1.U || ptr_value === 15.U) && state(0) === 5.U && state(1) === 0.U
-  io.mshr_l2miss_tag := Mux(state(0)===5.U && state(1) ===0.U, mshr_tag(0), 0.U)
+  // io.mshr_l2miss_tag := Mux(state(0)===5.U && state(1) ===0.U, mshr_tag(0), 0.U)
   /*runahead code end*/
 
   alloc_arb.io.out.ready := io.req.valid && sdq_rdy && cacheable && !idx_match
@@ -849,7 +850,7 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   data.io.write.bits.data := wdata_encoded.asUInt
 
 /*runahead code begin*/
-  io.cpu.mshr_l2miss_tag := mshrs.io.mshr_l2miss_tag
+  io.cpu.mshr_tag := mshrs.io.mshr_tag
   io.cpu.mshr_state := mshrs.io.mshr_state
   io.cpu.mshr_flag := mshrs.io.mshr_flag
 /*runahead code end*/
