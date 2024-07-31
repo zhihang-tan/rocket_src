@@ -1000,10 +1000,16 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val runahead_posedge_r = RegNext(runahead_posedge, init = false.B)
   sboard.clear((runahead_flag === true.B) && runahead_posedge_r, runahead_tag(6,2))//pretend stall for dependency
   val rf_invfile = new Scoreboard(32, true)
-  rf_invfile.set((runahead_flag === true.B) && runahead_posedge, runahead_tag(6,2))
+  rf_invfile.set((runahead_flag === true.B) && runahead_posedge_r, runahead_tag(6,2))
   val id_rfinvfile_propogation = checkHazards(rh_hazard_targets, rd => rf_invfile.read(rd) && !id_sboard_clear_bypass(rd))
   rf_invfile.set((runahead_flag === true.B) && id_rfinvfile_propogation, id_waddr) //although invalid, it will still writeback to rf
   rf_invfile.clear((runahead_flag === true.B) && !id_rfinvfile_propogation, id_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
+  val invfile = WireInit(VecInit(Seq.fill(31)(0.U(1.W))))
+  for (i <- 0 until 31) {
+      invfile(i) := rf_invfile.read(i.U).asUInt()
+  }
+  dontTouch(invfile)
+  dontTouch(id_rfinvfile_propogation)
   /*runahead invfile end*/
 
   /*runahead buffer beign*/
@@ -1125,7 +1131,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   } .elsewhen(runahead_state === s_runahead_wait_resp && s2_reg_io_dmem_req_bits_addr === io.dmem.resp.bits.addr && io.dmem.mshr_state(0) === 5.U && !io.dmem.resp.valid ) {
     inv_events := inv_events + 1.U
   }
-  when(runahead_state === s_runahead) {
+  when(runahead_posedge) {
     runahead_tag := mshr_l2miss_tag
   }.elsewhen (runahead_state === s_exit) {
     runahead_tag := 0.U
@@ -1347,7 +1353,8 @@ printf(p"Total l2Cache miss cycles: ${l2total_counter}\n")
 
   io.dmem.req.valid     := ex_reg_valid && ex_ctrl.mem && 
   !ex_rh_store && // rh_store will never send request to dcache
-  !(ishit_rh && ex_rh_load) //if rh_load hits in runahead buffer, the request will not send to dcache
+  !(ishit_rh && ex_rh_load) &&//if rh_load hits in runahead buffer, the request will not send to dcache
+  !(id_rfinvfile_propogation && ex_rh_load) //if load reqaddr is invalid, will not send request
   val ex_dcache_tag = Cat(ex_waddr, ex_ctrl.fp)
   require(coreParams.dcacheReqTagBits >= ex_dcache_tag.getWidth)
   io.dmem.req.bits.tag  := ex_dcache_tag
