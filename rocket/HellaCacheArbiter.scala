@@ -33,7 +33,6 @@ class HellaCacheArbiter(n: Int)(implicit p: Parameters) extends Module
         io.mem.req.bits := req.bits
         io.mem.req.bits.tag := Cat(req.bits.tag, i.U(log2Up(n).W))
         s1_id := i.U
-        io.mem.fake_resp := io.requestor(i).fake_resp
       }
       def connect_s1() = {
         io.mem.s1_kill := io.requestor(i).s1_kill
@@ -70,15 +69,14 @@ class HellaCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       io.requestor(i).s2_uncached := io.mem.s2_uncached
       io.requestor(i).s2_paddr := io.mem.s2_paddr
       io.requestor(i).clock_enabled := io.mem.clock_enabled
+      /*runahead code begin*/
       io.requestor(i).l2hit := io.mem.l2hit
-      resp.bits := io.mem.resp.bits
-      resp.bits.tag := io.mem.resp.bits.tag >> log2Up(n)
-
-/*runahead code begin*/
       io.requestor(i).mshr_tag := io.mem.mshr_tag
       io.requestor(i).mshr_state := io.mem.mshr_state
       io.requestor(i).mshr_flag := io.mem.mshr_flag
-/*runahead code end*/
+      /*runahead code end*/
+      resp.bits := io.mem.resp.bits
+      resp.bits.tag := io.mem.resp.bits.tag >> log2Up(n)
 
       io.requestor(i).replay_next := io.mem.replay_next
 

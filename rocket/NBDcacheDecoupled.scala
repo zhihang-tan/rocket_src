@@ -23,7 +23,7 @@ import scala.annotation.nowarn
 abstract class NBDcacheReadyValidIO[+T <: Data](gen: T) extends Bundle {
   // Compatibility hack for rocket-chip
     private val genType = if (DataMirror.internal.isSynthesizable(gen)) chiselTypeOf(gen) else gen
-
+  
 
   /** Indicates that the consumer is ready to accept the data this cycle
     * @group Signals

@@ -498,26 +498,6 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       assert((PopCount(s2_hit_vec) === 1.U) || s2_error, "L2 TLB multi-hit")
     }
 
-
-    //L2TLB miss counter
-    /*
-    val counter = RegInit(0.U(32.W))
-    val miss_detected = RegInit(false.B)
-    when(reset) {    
-      counter := 0.U
-      miss_detected := false.B
-    } .otherwise {
-        when(io.dpath.perf.l2miss) {
-        // miss，count
-        miss_detected := true.B
-        counter := counter + 1.U
-      } .elsewhen(miss_detected) {
-        // miss信号从高变低，printf cycle，reset counter and flag
-        printf(p"L2TLB miss lasted for ${counter} cycles\n")
-        counter := 0.U
-        miss_detected := false.B
-      }}*/
-
     val s2_pte = Wire(new PTE)
     val s2_hit_entry = Mux1H(s2_hit_vec, s2_entry_vec)
     s2_pte.ppn := s2_hit_entry.ppn

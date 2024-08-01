@@ -922,7 +922,7 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   }
   val s2_uncached_data_word = RegEnable(s1_uncached_data_word, io.cpu.replay_next)
   val doUncachedResp = RegNext(io.cpu.replay_next)
-  io.cpu.resp.valid := ((s2_valid_hit_pre_data_ecc || doUncachedResp) && !s2_data_error) //|| io.cpu.fake_resp
+  io.cpu.resp.valid := (s2_valid_hit_pre_data_ecc || doUncachedResp) && !s2_data_error
   io.cpu.replay_next := tl_out.d.fire() && grantIsUncachedData && !cacheParams.separateUncachedResp.B
   when (doUncachedResp) {
     assert(!s2_valid_hit)

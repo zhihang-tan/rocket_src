@@ -621,7 +621,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -680,7 +682,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -699,7 +703,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -718,7 +724,9 @@ class TLEdgeIn(
     b.mask    := mask
     b.data    := data
     b.corrupt := corrupt
+    /*runahead code beigin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -734,7 +742,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -750,7 +760,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := data
     b.corrupt := corrupt
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
@@ -766,7 +778,9 @@ class TLEdgeIn(
     b.mask    := mask(fromAddress, lgSize)
     b.data    := 0.U
     b.corrupt := false.B
+    /*runahead code begin*/
     b.hit     := true.B
+    /*runahead code end*/
     (legal, b)
   }
 
