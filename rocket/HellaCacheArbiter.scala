@@ -72,6 +72,7 @@ class HellaCacheArbiter(n: Int)(implicit p: Parameters) extends Module
       /*runahead code begin*/
       io.requestor(i).l2hit := io.mem.l2hit
       io.requestor(i).mshr_tag := io.mem.mshr_tag
+      io.requestor(i).mshr_addr := io.mem.mshr_addr
       io.requestor(i).mshr_state := io.mem.mshr_state
       io.requestor(i).mshr_flag := io.mem.mshr_flag
       /*runahead code end*/

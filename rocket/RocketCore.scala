@@ -235,6 +235,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code begin*/
   val ex_rh_store = Reg(Bool())
   val ex_rh_load = Reg(Bool())
+  val ex_dmem_req_inv = Wire(Bool())
   /*runahead code end*/
   val ex_reg_mem_size = Reg(UInt())
   val ex_reg_hls = Reg(Bool())
@@ -258,6 +259,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val mem_reg_sfence = Reg(Bool())
   val mem_reg_pc = Reg(UInt())
   /*runahead code begin*/
+  val mem_dmem_req_inv = Reg(Bool())
   val mem_rh_load = Reg(Bool())
   val mem_rh_store = Reg(Bool())
   /*runahead code end*/
@@ -281,6 +283,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_reg_sfence = Reg(Bool())
   val wb_reg_pc = Reg(UInt())
   /*runahead code begin*/
+  val wb_dmem_req_inv = Reg(Bool())
   val wb_reg_store = Reg(Bool())
   val wb_reg_load = Reg(Bool())
   val runahead_posedge = Wire(Bool())
@@ -305,6 +308,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
    s1_runahead_posedge || db_flag
 
   val runahead_tag = RegInit(0.U(7.W))
+  val runahead_addr = RegInit(0.U(40.W))
 
   val rcu = Module(new RCU(RCU_Params(xLen)))
   val runahead_flag = Wire(Bool())
@@ -597,8 +601,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     ex_reg_wphit := bpu.io.bpwatch.map { bpw => bpw.ivalid(0) }
 
     /*runahead code begin*/
-    ex_rh_load := id_ctrl.mem && id_ctrl.mem_cmd === M_XWR && (runahead_flag === true.B)
-    ex_rh_store := id_ctrl.mem && id_ctrl.mem_cmd === M_XRD && (runahead_flag === true.B)
+    ex_rh_load := id_ctrl.mem && id_ctrl.mem_cmd === M_XRD && (runahead_flag === true.B)
+    ex_rh_store := id_ctrl.mem && id_ctrl.mem_cmd === M_XWR && (runahead_flag === true.B)
     /*runahead code end*/
 
 
@@ -606,7 +610,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   // replay inst in ex stage?
   val ex_pc_valid = ex_reg_valid || ex_reg_replay || ex_reg_xcpt_interrupt
-  val wb_dcache_miss = wb_ctrl.mem && !io.dmem.resp.valid
+  val wb_dcache_miss = wb_ctrl.mem && !io.dmem.resp.valid &&
+  /*runahead code begin*/
+  !wb_dmem_req_inv
+  /*runahead code end*/
   val replay_ex_structural = ex_ctrl.mem && !io.dmem.req.ready ||
                              ex_ctrl.div && !div.io.req.ready
   val replay_ex_load_use = wb_dcache_miss && ex_reg_load_use
@@ -736,6 +743,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     /*runahead code begin*/
     mem_rh_load := ex_rh_load
     mem_rh_store := ex_rh_store
+    mem_dmem_req_inv := ex_dmem_req_inv
     /*runahead code end*/
     mem_reg_sfence := ex_sfence
     mem_reg_btb_resp := ex_reg_btb_resp
@@ -821,6 +829,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     /*runahead code begin*/
     wb_reg_store := mem_reg_store
     wb_reg_load := mem_reg_load
+    wb_dmem_req_inv := mem_dmem_req_inv
     /*runahead code end*/
     wb_reg_wphit := mem_reg_wphit | bpu.io.bpwatch.map { bpw => (bpw.rvalid(0) && mem_reg_load) || (bpw.wvalid(0) && mem_reg_store) }
   }
@@ -878,7 +887,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   io.imem.l2miss := rcu.io.l2miss
   io.imem.l2back := db_flag
   val mshr_l2miss_tag = Mux(io.dmem.mshr_state(1) === 0.U,io.dmem.mshr_tag(0), 0.U)
-  val s_runahead_wait_req ::s_runahead_wait_resp :: s_runahead :: s_pass :: s_inv :: s_exit :: Nil = Enum(6)
+  val mshr_l2miss_addr = Mux(io.dmem.mshr_state(1) === 0.U,io.dmem.mshr_addr(0), 0.U)
+  val s_runahead_wait_req ::s_runahead_wait_resp :: s_runahead :: s_pass :: s_inv :: s_pseudo_exit :: s_exit :: Nil = Enum(7)
   val runahead_state = RegInit(s_runahead_wait_req)
   val s1_runahead = RegNext(runahead_state === s_runahead, init = false.B)
   val s2_runahead = RegNext(s1_runahead,init = false.B)
@@ -937,7 +947,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     }
   }
   /*runahead code end*/
-  when (rf_wen/* &&! db_flag*/) { rf.write(rf_waddr, rf_wdata) }
+  when (rf_wen &&
+  /*runahead code begin*/
+  !(runahead_state === s_pseudo_exit && io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag(6, 2) && io.dmem.resp.bits.addr === runahead_addr)
+  /*runahead code end*/
+  ) { rf.write(rf_waddr, rf_wdata) }
 
   // hook up control/status regfile
   csr.io.ungated_clock := clock
@@ -1074,8 +1088,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   rcu.io.l2miss := runahead_posedge
 
 
-  when(runahead_state === s_pass && io.dmem.mshr_state(0) === 0.U) {
-    db_flag := io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag(6, 2)
+  when(runahead_state === s_pass && io.dmem.mshr_state(0) === 0.U/* && io.dmem.mshr_state(1) === 0.U*/) {
+    db_flag := io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag(6, 2) && io.dmem.resp.bits.addr === runahead_addr
   } .otherwise {
     db_flag := false.B
   } 
@@ -1088,8 +1102,13 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   }
   when(runahead_posedge) {
     runahead_tag := mshr_l2miss_tag
-  }.elsewhen (runahead_state === s_exit) {
+    runahead_addr := mshr_l2miss_addr
+  } .elsewhen (runahead_state === s_pseudo_exit) {
+    runahead_tag := io.dmem.mshr_tag(1)
+    runahead_addr:= io.dmem.mshr_addr(1)
+  } .elsewhen (runahead_state === s_exit) {
     runahead_tag := 0.U
+    runahead_addr := 0.U
   }
 
   when(runahead_state === s_runahead_wait_req && io.dmem.req.valid && io.dmem.mshr_state(0) === 5.U) {
@@ -1117,8 +1136,16 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   //     runahead_state := s_inv
   //   }
   when(db_flag && runahead_state === s_pass) {
+    when(io.dmem.mshr_state(1) === 0.U) {
+      runahead_state := s_exit
+    } .otherwise {
+      runahead_state := s_pseudo_exit
+    }
+  }
+  when(runahead_state === s_pseudo_exit && io.dmem.resp.valid && io.dmem.resp.bits.tag(5, 1) === runahead_tag(6, 2) && io.dmem.resp.bits.addr === runahead_addr) {
     runahead_state := s_exit
   }
+
   when(runahead_state === s_inv && io.dmem.resp.valid) {
     runahead_state := s_exit
   }
@@ -1132,6 +1159,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   dontTouch(id_ex_hazard)
   dontTouch(id_mem_hazard)
   dontTouch(id_wb_hazard)
+  dontTouch(wb_waddr)
 
    runahead_flag :=   rcu.io.runahead_flag
   /*runahead code end*/
@@ -1153,7 +1181,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   rf_invfile.set((runahead_flag === true.B) && ex_rfinvfile_propogation, ex_waddr) //although invalid, it will still writeback to rf
   val rf_invfile_clear = Reg(Bool())
   rf_invfile_clear := !ctrl_killd || csr.io.interrupt || ibuf.io.inst(0).bits.replay
-  rf_invfile.clear((runahead_flag === true.B) && !ex_rfinvfile_propogation && !s1_runahead_posedge && !rf_invfile_clear, ex_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
+  rf_invfile.clear((runahead_flag === true.B) && !ex_rfinvfile_propogation && !s1_runahead_posedge && rf_invfile_clear, ex_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
   val invfile = WireInit(VecInit(Seq.fill(31)(0.U(1.W))))
   for(i <- 0 until 31) {
     invfile(i) := rf_invfile.read(i.U).asUInt()
@@ -1255,6 +1283,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
         sboard.set(rcu.io.sb_out(j) === true.B && (j.U =/= runahead_tag(6, 2)) ,j.U) 
       }
     }
+
+    ex_dmem_req_inv := ishit_rh || ex_rh_load && ex_rfinvfile_propogation
   /*runahead code end*/
 
   val dcache_blocked = {
@@ -1344,7 +1374,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   io.dmem.req.valid     := ex_reg_valid && ex_ctrl.mem &&
   /*runahead code begin*/
   !ex_rh_store &&                             // rh_store will never send request to dcache
-  !(ishit_rh || ex_rh_load && ex_rfinvfile_propogation)
+  !ex_dmem_req_inv
   // !(ishit_rh && ex_rh_load) &&               //if rh_load hits in runahead buffer, the request will not send to dcache
   // !(ex_rfinvfile_propogation && ex_rh_load) //if load reqaddr is invalid, will not send request
   /*runahead code end*/
