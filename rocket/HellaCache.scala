@@ -184,10 +184,11 @@ class HellaCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
   /*runahead code begin*/
   val l2hit = Input(Bool())
 
-  val mshr_tag = Input(Vec(2, Bits(7.W)))
-  val mshr_addr = Input(Vec(2, Bits(40.W)))
-  val mshr_state = Input(Vec(2, Bits(4.W)))
+  val mshr_tag = Input(Vec(4, Bits(7.W)))
+  val mshr_addr = Input(Vec(4, Bits(40.W)))
+  val mshr_state = Input(Vec(4, Bits(4.W)))
   val mshr_flag = Input(Bool())
+  val runahead_flag = Output(Bool())
   /*runahead code end*/
 
   val keep_clock_enabled = Output(Bool()) // should D$ avoid clock-gating itself?

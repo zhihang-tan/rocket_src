@@ -166,6 +166,7 @@ class MSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCach
     val state = Output(UInt(4.W))
     val enq_ptr_value = Output(UInt(4.W))
     val deq_ptr_value = Output(UInt(4.W))
+    val runahead_flag = Input(Bool())
     /*runahead code end*/
   })
 
@@ -179,7 +180,11 @@ class MSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCach
   val req_idx = req.addr(untagBits-1,blockOffBits)
   val req_tag = req.addr >> untagBits
   val req_block_addr = (req.addr >> blockOffBits) << blockOffBits
-  val idx_match = req_idx === io.req_bits.addr(untagBits-1,blockOffBits)
+  /*runahead code begin*/
+  //val idx_match = req_idx === io.req_bits.addr(untagBits-1,blockOffBits)
+  dontTouch(io.runahead_flag)
+  val idx_match = Mux(io.runahead_flag,false.B,req_idx === io.req_bits.addr(untagBits-1,blockOffBits))
+  /*runahead code end*/
 
   val new_coh = RegInit(ClientMetadata.onReset)
   val (_, shrink_param, coh_on_clear)    = req.old_meta.coh.onCacheControl(M_FLUSH)
@@ -206,6 +211,9 @@ class MSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCach
   /*runahead code begin*/
   io.enq_ptr_value := rpq.io.enq_ptr_value
   io.deq_ptr_value := rpq.io.deq_ptr_value
+  dontTouch(req_idx)
+  val req_bits_addr = io.req_bits.addr(untagBits-1,blockOffBits)
+  dontTouch(req_bits_addr)
   //dontTouch(io.enq_ptr_value)
   //dontTouch(io.deq_ptr_value)
   /*runahead code end*/
@@ -346,10 +354,11 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     val fence_rdy = Output(Bool())
     val replay_next = Output(Bool())
     /*runahead code begin*/
-    val mshr_tag = Output(Vec(2, Bits(7.W)))
-    val mshr_addr = Output(Vec(2, Bits(40.W)))
-    val mshr_state = Output(Vec(2, Bits(4.W)))
+    val mshr_tag = Output(Vec(4, Bits(7.W)))
+    val mshr_addr = Output(Vec(4, Bits(40.W)))
+    val mshr_state = Output(Vec(4, Bits(4.W)))
     val mshr_flag = Output(Bool())
+    val runahead_flag = Input(Bool())
 
     /*runahead code end*/
   })
@@ -430,6 +439,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     mshr_addr(i) := mshr.io.replay.bits.addr
     enq_ptr_value(i) := mshr.io.enq_ptr_value
     deq_ptr_value(i) := mshr.io.deq_ptr_value
+    mshr.io.runahead_flag := io.runahead_flag
     /*runahead code end*/
 
     mshr
@@ -857,6 +867,7 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   io.cpu.mshr_state := mshrs.io.mshr_state
 
   io.cpu.mshr_flag := mshrs.io.mshr_flag
+  mshrs.io.runahead_flag := io.cpu.runahead_flag
   /*runahead code end*/
 
   // tag read for new requests

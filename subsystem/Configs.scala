@@ -103,9 +103,9 @@ class WithNBigCores(
       dcache = Some(DCacheParams(
         rowBits = site(SystemBusKey).beatBits,
         /*runahead code begin*/
-        nMSHRs = 2,
-        nSets = 32,
-        nWays = 8,
+        nMSHRs = 4,
+        nSets = 16,
+        nWays = 4,
         /*runahead code end*/
         blockBytes = site(CacheBlockBytes))),
       icache = Some(ICacheParams(
