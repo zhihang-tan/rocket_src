@@ -979,20 +979,20 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val miss_detected = RegInit(false.B)
   val miss_events = RegInit(0.U(32.W))
   val total_counter = RegInit(0.U(32.W))
-  miss_sig := (wb_dcache_miss) || (dcache_blocked === true.B) //&& id_ctrl.mem_cmd === M_XRD //if load miss?
-  miss_sig2 := (dcache_blocked === true.B)
+  miss_sig := (wb_dcache_miss) || (dcache_blocked === true.B) || (id_sboard_hazard) //&& id_ctrl.mem_cmd === M_XRD //if load miss?
+  // miss_sig2 := (dcache_blocked === true.B)
 
   when(reset.asBool()) {
     counter := 0.U
     miss_detected := false.B
     miss_events := 0.U // 重置miss事件计数器
 }.otherwise {
-    when(miss_sig || miss_sig2) {
+    when(miss_sig) {
         // 检测到miss
         when(!miss_detected) {
             miss_detected := true.B
         }
-        counter := counter + 4.U
+        counter := counter + 1.U
     }.elsewhen(miss_detected) {
         // miss信号从高变低
         when(counter > 50.U) {
@@ -1008,6 +1008,10 @@ printf(p"Total DCache miss events: ${miss_events}\n")
 printf(p"Total DCache miss cycles: ${total_counter}\n")
 
   dontTouch(l2hit)
+
+  val sboradfile = WireInit(VecInit(Seq.fill(31)(0.U(1.W))))
+  for(i <- 0 until 31) {
+    sboradfile(i) := sboard.read(i.U).asUInt()}
 
 
   //blocking cache fake resp signal

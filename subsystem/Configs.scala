@@ -102,12 +102,14 @@ class WithNBigCores(
         divEarlyOut = true))),
       dcache = Some(DCacheParams(
         rowBits = site(SystemBusKey).beatBits,
-        nMSHRs = 2,
-        nSets = 32,
-        nWays = 8,
+        nMSHRs = 4,
+        nSets = 16,
+        nWays = 4,
         blockBytes = site(CacheBlockBytes))),
       icache = Some(ICacheParams(
         rowBits = site(SystemBusKey).beatBits,
+        nSets = 32,
+        nWays = 4,
         blockBytes = site(CacheBlockBytes))))
     List.tabulate(n)(i => RocketTileAttachParams(
       big.copy(hartId = i + idOffset),
