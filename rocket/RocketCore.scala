@@ -235,7 +235,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code begin*/
   val ex_rh_store = Reg(Bool())
   val ex_rh_load = Reg(Bool())
-  val ex_rh_hit = Reg(Bool())
+  val ex_rh_hit = Wire(Bool())
   val ex_dmem_req_inv = Wire(Bool())
   /*runahead code end*/
   val ex_reg_mem_size = Reg(UInt())
@@ -293,6 +293,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val s1_runahead_posedge = RegNext(runahead_posedge, init = false.B)
   val s2_runahead_posedge = RegNext(s1_runahead_posedge, init = false.B)
   val db_flag = Reg(Bool())
+  val s1_db_flag = RegNext(db_flag,init = false.B)
   val exit_miss_back = Wire(Bool())
   /*runahead code end*/
   val wb_reg_mem_size = Reg(UInt())
@@ -930,8 +931,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
-  val rf_wen = wb_wen || ll_wen
+  val rf_wen = (wb_wen || ll_wen) &&
   /*runahead code begin*/
+  !(db_flag || s1_db_flag)  //在db_flag和之后的一个cycle不能写回
+
   val rhbuffer_data = RegInit(VecInit(Seq.fill(10)(0.U(64.W))))
   val hit_ptr = WireInit(0.U(5.W))
 
