@@ -631,57 +631,59 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ex_slow_bypass = ex_ctrl.mem_cmd === M_XSC || ex_reg_mem_size < 2.U
   val ex_sfence = usingVM.B && ex_ctrl.mem && (ex_ctrl.mem_cmd === M_SFENCE || ex_ctrl.mem_cmd === M_HFENCEV || ex_ctrl.mem_cmd === M_HFENCEG)
 
-  //*****************dcache miss counter**********************************************
-//   val counter = RegInit(0.U(32.W))
-//   val miss_detected = RegInit(false.B)
-//   val miss_events = RegInit(0.U(32.W))
+  //*****************runahead interval counter**********************************************
+  val rhcounter = RegInit(0.U(32.W))
+  val rh_detected = RegInit(false.B)
+  val rh_events = RegInit(0.U(32.W))
+  val total_rhcounter = RegInit(0.U(32.W))
 
-//   when(reset.asBool()) {
-//     counter := 0.U
-//     miss_detected := false.B
-//     miss_events := 0.U // 重置miss事件计数器
-// }.otherwise {
-//     when(wb_dcache_miss) {
-//         // 检测到miss
-//         when(!miss_detected) {
-//             miss_detected := true.B
-//         }
-//         counter := counter + 1.U
-//     }.elsewhen(miss_detected) {
-//         // miss信号从高变低
-//         when(counter > 2.U) {
-//             // printf(p"DCache miss lasted for ${counter} cycles\n")
-//             miss_events := miss_events + 40.U // 当miss的周期大于3时才增加miss事件计数
-//         }
-//         counter := 0.U
-//         miss_detected := false.B
-//     }
-// }
-// // printf(p"Total DCache miss events: ${miss_events}\n")
+  when(reset.asBool()) {
+    rhcounter := 0.U
+    rh_detected := false.B
+    rh_events := 0.U // 重置miss事件计数器
+}.otherwise {
+    when(runahead_flag) {
+        // 检测到rh
+        when(!rh_detected) {
+            rh_detected := true.B
+        }
+        rhcounter := rhcounter + 1.U
+    }.elsewhen(rh_detected) {
+        // flag信号从高变低
+        when(rhcounter > 3.U) {
+            printf(p"rh lasted for ${rhcounter} cycles\n")
+            rh_events := rh_events + 1.U // 当rh的周期大于50时才增加事件计数
+        }
+        total_rhcounter := total_rhcounter + rhcounter // 累计 counter 值到 total_counter
+        rhcounter := 0.U
+        rh_detected := false.B
+    }
+}
+printf(p"Total rh events: ${rh_events}\n")
+printf(p"Total rh cycles: ${total_rhcounter}\n")
+//*****************runahead interval counter**********************************************
+
+//*****************runahead coverage counter**********************************************
+  val cvcounter = RegInit(0.U(32.W))
+  val rh_cv_events = RegInit(0.U(32.W))
+
+  when(reset.asBool()) {
+    cvcounter := 0.U
+    rh_cv_events := 0.U // 重置miss事件计数器
+}.otherwise {
+    when(io.dmem.perf.acquire) {
+        cvcounter := cvcounter + 1.U
+        when(runahead_flag) {
+            printf(p"rh_cv_events detect ${rh_cv_events} times\n")
+            rh_cv_events := rh_cv_events + 1.U // 当rh时才增加事件计数
+        }
+    }
+}
+printf(p"Total rh cv events: ${rh_cv_events}\n")
+printf(p"Total independent miss event: ${cvcounter}\n")
+//*****************runahead coverage counter**********************************************
 
 
-//   //dcache access count
-//   val access_detected = RegInit(false.B)
-//   val access_events = RegInit(0.U(32.W))
-
-//     when(reset.asBool()) {    
-//     access_detected := false.B
-//     access_events := 0.U // 重置access事件计数器
-// }.otherwise {
-//     when(io.dmem.req.valid) {
-//         // access count
-//         when(!access_detected) {
-//             access_detected := true.B
-//             access_events := access_events + 1.U // 在首次检测到access时增加access事件计数
-//         }
-//     }.elsewhen(access_detected) {
-//         // access信号从高变低，然后重置flag
-//         // printf(p"DCache access detect!\n")
-//         access_detected := false.B
-//     }
-// }
-// printf(p"Total DCache access events: ${access_events}\n")
-//********************************************************************************************
 //记录所有fp inst numbers
 //   val fp_events = RegInit(0.U(32.W))
 //   val fp_eventsnext = RegInit(0.U(32.W))

@@ -110,10 +110,15 @@ class WithNBigCores(
         blockBytes = site(CacheBlockBytes))),
       icache = Some(ICacheParams(
         rowBits = site(SystemBusKey).beatBits,
+<<<<<<< HEAD
         /*runahead code begin*/
         nSets = 32,
         nWays = 4,
         /*runahead code end*/
+=======
+        nSets = 32,
+        nWays = 4,
+>>>>>>> 62380aa (add coverage/interval counter)
         blockBytes = site(CacheBlockBytes))))
     List.tabulate(n)(i => RocketTileAttachParams(
       big.copy(hartId = i + idOffset),
