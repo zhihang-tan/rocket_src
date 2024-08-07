@@ -235,6 +235,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code begin*/
   val ex_rh_store = Reg(Bool())
   val ex_rh_load = Reg(Bool())
+  val ex_rh_hit = Reg(Bool())
   val ex_dmem_req_inv = Wire(Bool())
   /*runahead code end*/
   val ex_reg_mem_size = Reg(UInt())
@@ -262,6 +263,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val mem_dmem_req_inv = Reg(Bool())
   val mem_rh_load = Reg(Bool())
   val mem_rh_store = Reg(Bool())
+  val mem_rh_hit = Reg(Bool())
   /*runahead code end*/
   val mem_reg_inst = Reg(Bits())
   val mem_reg_mem_size = Reg(UInt())
@@ -286,10 +288,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_dmem_req_inv = Reg(Bool())
   val wb_reg_store = Reg(Bool())
   val wb_reg_load = Reg(Bool())
+  val wb_rh_hit = Reg(Bool())
   val runahead_posedge = Wire(Bool())
   val s1_runahead_posedge = RegNext(runahead_posedge, init = false.B)
   val s2_runahead_posedge = RegNext(s1_runahead_posedge, init = false.B)
   val db_flag = Reg(Bool())
+  val exit_miss_back = Wire(Bool())
   /*runahead code end*/
   val wb_reg_mem_size = Reg(UInt())
   val wb_reg_hls_or_dv = Reg(Bool())
@@ -302,7 +306,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val take_pc_wb = Wire(Bool())
   val wb_reg_wphit           = Reg(Vec(nBreakpoints, Bool()))
 
-  val take_pc_mem_wb = take_pc_wb || take_pc_mem || db_flag
+  val take_pc_mem_wb = take_pc_wb || take_pc_mem || db_flag //|| exit_miss_back
   val take_pc = take_pc_mem_wb ||
   /*runahead code begin*/
    s1_runahead_posedge
@@ -616,7 +620,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ex_pc_valid = ex_reg_valid || ex_reg_replay || ex_reg_xcpt_interrupt
   val wb_dcache_miss = wb_ctrl.mem && !io.dmem.resp.valid &&
   /*runahead code begin*/
-  !wb_dmem_req_inv
+  !wb_dmem_req_inv && !exit_miss_back
   /*runahead code end*/
   val replay_ex_structural = ex_ctrl.mem && !io.dmem.req.ready ||
                              ex_ctrl.div && !div.io.req.ready
@@ -748,6 +752,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     mem_rh_load := ex_rh_load
     mem_rh_store := ex_rh_store
     mem_dmem_req_inv := ex_dmem_req_inv
+    mem_rh_hit := ex_rh_hit
     /*runahead code end*/
     mem_reg_sfence := ex_sfence
     mem_reg_btb_resp := ex_reg_btb_resp
@@ -834,6 +839,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_store := mem_reg_store
     wb_reg_load := mem_reg_load
     wb_dmem_req_inv := mem_dmem_req_inv
+    wb_rh_hit := mem_rh_hit
     /*runahead code end*/
     wb_reg_wphit := mem_reg_wphit | bpu.io.bpwatch.map { bpw => (bpw.rvalid(0) && mem_reg_load) || (bpw.wvalid(0) && mem_reg_store) }
   }
@@ -881,15 +887,16 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code end*/
   val dmem_resp_fpu =  io.dmem.resp.bits.tag(0).asBool
   val dmem_resp_waddr = io.dmem.resp.bits.tag(5, 1)
-  val dmem_resp_valid = io.dmem.resp.valid && io.dmem.resp.bits.has_data ||
+  val dmem_resp_valid = (io.dmem.resp.valid && io.dmem.resp.bits.has_data ||
   /*runahead code begin*/
-  (rh_load_resp === true.B)
+  (rh_load_resp === true.B)) && !exit_miss_back
   /*runahead code end*/
   val dmem_resp_replay = dmem_resp_valid && io.dmem.resp.bits.replay
 
  /*runahead code begin*/
   io.imem.l2miss := rcu.io.l2miss
   io.imem.l2back := db_flag
+  io.imem.exit_miss_back := exit_miss_back
   val mshr_l2miss_tag = Mux(io.dmem.mshr_state(1) === 0.U,io.dmem.mshr_tag(0), 0.U)
   val mshr_l2miss_addr = Mux(io.dmem.mshr_state(1) === 0.U,io.dmem.mshr_addr(0), 0.U)
   val s_runahead_wait_req ::s_runahead_wait_resp :: s_runahead :: s_pass :: s_inv :: s_pseudo_exit :: s_exit :: Nil = Enum(7)
@@ -927,12 +934,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   /*runahead code begin*/
   val rhbuffer_data = RegInit(VecInit(Seq.fill(10)(0.U(64.W))))
   val hit_ptr = WireInit(0.U(5.W))
-  val ishit_rh = Reg(Bool())
+
   /*runahead code end*/
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
   val rf_wdata = 
                 /*runahead code begin*/
-                 Mux(dmem_resp_valid && dmem_resp_xpu && (runahead_flag === true.B) && (ishit_rh === true.B), rhbuffer_data(hit_ptr),
+                 Mux(dmem_resp_valid && dmem_resp_xpu && (runahead_flag === true.B) && (wb_rh_hit === true.B), rhbuffer_data(hit_ptr),
                 /*runahead code end*/
                  Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
@@ -950,14 +957,15 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       }
     }
   }
+  exit_miss_back := runahead_state === s_pseudo_exit && io.dmem.resp.valid && (
+                       io.dmem.resp.bits.tag(5, 1) === runahead_tag(1)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(1) && runahead_l2miss_events(0) === true.B ||
+                       io.dmem.resp.bits.tag(5, 1) === runahead_tag(2)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(2) && runahead_l2miss_events(1) === true.B ||
+                       io.dmem.resp.bits.tag(5, 1) === runahead_tag(3)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(3) && runahead_l2miss_events(2) === true.B)
   /*runahead code end*/
-  when (rf_wen &&
+
+  when (rf_wen //&&
   /*runahead code begin*/
-  !(runahead_state === s_pseudo_exit && io.dmem.resp.valid && (
-  io.dmem.resp.bits.tag(5, 1) === runahead_tag(1)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(1) && runahead_l2miss_events(0) === true.B ||
-  io.dmem.resp.bits.tag(5, 1) === runahead_tag(2)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(2) && runahead_l2miss_events(1) === true.B ||
-  io.dmem.resp.bits.tag(5, 1) === runahead_tag(3)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(3) && runahead_l2miss_events(2) === true.B)
-  )
+ // !exit_miss_back
   /*runahead code end*/
   ) { rf.write(rf_waddr, rf_wdata) }
 
@@ -1166,7 +1174,7 @@ when(runahead_posedge) {
     runahead_state := s_runahead_wait_req
   }
 
-  when(runahead_state === s_runahead_wait_req && runahead_enter && !take_pc_mem_wb_reg && !io.dmem.req.valid) {
+  when(runahead_state === s_runahead_wait_req && runahead_enter && !take_pc_mem_wb_reg && !io.dmem.req.valid && io.dmem.mshr_cmd(0) === 0.U && !io.dmem.alloc_arb_out_ready) {
     when(inv_events === 0.U) {
       runahead_state := s_runahead
     } .otherwise {
@@ -1227,7 +1235,7 @@ when(runahead_posedge) {
   rf_invfile.set((runahead_flag === true.B) && ex_rfinvfile_propogation || rfinvfile_block_miss, ex_waddr) //although invalid, it will still writeback to rf
   val rf_invfile_clear = Reg(Bool())
   rf_invfile_clear := !ctrl_killd || csr.io.interrupt || ibuf.io.inst(0).bits.replay
-  rf_invfile.clear((runahead_flag === true.B) && !ex_rfinvfile_propogation && !s1_runahead_posedge && rf_invfile_clear, ex_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
+  rf_invfile.clear((runahead_flag === true.B) && !ex_rfinvfile_propogation && !s1_runahead_posedge && rf_invfile_clear && !rfinvfile_block_miss, ex_waddr) // to do: add a ctrl_sig, judge if a load addr is valid
   val invfile = WireInit(VecInit(Seq.fill(31)(0.U(1.W))))
   for(i <- 0 until 31) {
     invfile(i) := rf_invfile.read(i.U).asUInt()
@@ -1247,7 +1255,7 @@ when(runahead_posedge) {
   val addr_invfile = new Scoreboard(10, true)
 
   //hit? and find hit_ptr
-  ishit_rh := MuxCase(0.U,Seq(
+  ex_rh_hit := MuxCase(0.U,Seq(
     ((rhbuffer_addr(0) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(0) =/= 0.U)) -> true.B,
     ((rhbuffer_addr(1) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(1) =/= 0.U)) -> true.B,
     ((rhbuffer_addr(2) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(2) =/= 0.U)) -> true.B,
@@ -1276,18 +1284,18 @@ when(runahead_posedge) {
   // val addr_matches = rhbuffer_addr.zipWithIndex.map { case (addr, idx) =>
   // (addr === dmem_req_addr && addr_invfile.read === 1.U).asUInt << idx
   // }.reduce(_ | _)
-  // ishit_rh := addr_matches.orR
+  // ex_rh_hit := addr_matches.orR
   // val hit_ptr = (0 until 9).find { idx =>
   // (addr_matches >> idx).asUInt(0) === 1.U
   // }
 
   //store
-  when((ex_rh_store === true.B) && (runahead_flag === true.B) && (ishit_rh === false.B) ){//store the data
+  when((ex_rh_store === true.B) && (runahead_flag === true.B) && (ex_rh_hit === false.B) ){//store the data
     val size = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_reg_mem_size)
     rhbuffer_addr(wr_ptr) := dmem_req_addr
     rhbuffer_data(wr_ptr) := new StoreGen(size, 0.U, ex_rs(1), coreDataBytes).data
     wr_ptr := Mux(wr_ptr === 9.U, 0.U, wr_ptr + 1.U)
-  }.elsewhen((ex_rh_store === true.B) && (runahead_flag === true.B) && (ishit_rh === true.B)){//replace the data
+  }.elsewhen((ex_rh_store === true.B) && (runahead_flag === true.B) && (ex_rh_hit === true.B)){//replace the data
     val size = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_reg_mem_size)
     rhbuffer_data(hit_ptr) := new StoreGen(size, 0.U, ex_rs(1), coreDataBytes).data
   }
@@ -1296,7 +1304,7 @@ when(runahead_posedge) {
   // addr_invfile.clear(runahead_flag && runahead_posedge, runahead_tag(0)(6, 2))
 
   //load -> send this data to register file
-  when((ex_rh_load === true.B) && (runahead_flag === true.B) && (ishit_rh === true.B)){//load the data
+  when((ex_rh_load === true.B) && (runahead_flag === true.B) && (ex_rh_hit === true.B)){//load the data
     rh_load_resp := true.B
   }.otherwise{
     rh_load_resp := false.B
@@ -1330,7 +1338,7 @@ when(runahead_posedge) {
       }
     }
 
-    ex_dmem_req_inv := ishit_rh || ex_rh_load && ex_rfinvfile_propogation || 
+    ex_dmem_req_inv := ex_rh_hit || ex_rh_load && ex_rfinvfile_propogation || 
                         (runahead_flag && dmem_req_addr >= block_addr) && (dmem_req_addr <= (block_addr + 64.U))
   /*runahead code end*/
 
@@ -1357,7 +1365,10 @@ when(runahead_posedge) {
     id_reg_pause ||
     io.traceStall
     // db_flag
-  ctrl_killd := (!ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt)
+  ctrl_killd := (!ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt) //|| 
+  /*runahead code begin*/
+  //exit_miss_back
+  /*runahead code end*/
 
   io.imem.req.valid := take_pc
   io.imem.req.bits.speculative := !take_pc_wb
@@ -1422,7 +1433,7 @@ when(runahead_posedge) {
   /*runahead code begin*/
   !ex_rh_store &&                             // rh_store will never send request to dcache
   !ex_dmem_req_inv
-  // !(ishit_rh && ex_rh_load) &&               //if rh_load hits in runahead buffer, the request will not send to dcache
+  // !(ex_rh_hit && ex_rh_load) &&               //if rh_load hits in runahead buffer, the request will not send to dcache
   // !(ex_rfinvfile_propogation && ex_rh_load) //if load reqaddr is invalid, will not send request
   dmem_req_addr := encodeVirtualAddress(ex_rs(0), alu.io.adder_out)
   //same_tag_miss := runahead_flag && runahead_tag(0)(6, 2) === ex_waddr

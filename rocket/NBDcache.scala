@@ -355,9 +355,11 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     val replay_next = Output(Bool())
     /*runahead code begin*/
     val mshr_tag = Output(Vec(4, Bits(7.W)))
+    val mshr_cmd = Output(Vec(4, Bits(5.W)))
     val mshr_addr = Output(Vec(4, Bits(40.W)))
     val mshr_state = Output(Vec(4, Bits(4.W)))
     val mshr_flag = Output(Bool())
+    val alloc_arb_out_ready = Output(Bool())
     val runahead_flag = Input(Bool())
 
     /*runahead code end*/
@@ -388,7 +390,9 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
   /*runahead code begin*/
   val state = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
   val mshr_tag = Wire(Vec(cfg.nMSHRs, Bits(7.W)))
+  val mshr_cmd = Wire(Vec(cfg.nMSHRs, Bits(5.W)))
   val mshr_addr = Wire(Vec(cfg.nMSHRs, Bits(40.W)))
+  val alloc_arb_out_ready = Wire(Bool())
   val enq_ptr_value = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
   val deq_ptr_value = Wire(Vec(cfg.nMSHRs, Bits(4.W)))
   /*runahead code end*/
@@ -436,6 +440,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     /*runahead code begin*/
     state(i) := mshr.io.state
     mshr_tag(i) := mshr.io.replay.bits.tag
+    mshr_cmd(i) := mshr.io.replay.bits.cmd
     mshr_addr(i) := mshr.io.replay.bits.addr
     enq_ptr_value(i) := mshr.io.enq_ptr_value
     deq_ptr_value(i) := mshr.io.deq_ptr_value
@@ -448,12 +453,15 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
   /*runahead code begin*/
   io.mshr_state := state
   io.mshr_tag := mshr_tag
+  io.mshr_cmd := mshr_cmd
   io.mshr_addr := mshr_addr
+  io.alloc_arb_out_ready := alloc_arb_out_ready
   val ptr_value = Mux((enq_ptr_value(0) - deq_ptr_value(0)) < 0.U, ~(enq_ptr_value(0) - deq_ptr_value(0)) + 1.U ,(enq_ptr_value(0) - deq_ptr_value(0)))
   dontTouch(ptr_value)
   //这里只考虑了一个load的情况 need to change 
   io.mshr_flag :=  (ptr_value === 1.U || ptr_value === 15.U) && state(0) === 5.U && state(1) === 0.U
   //io.mshr_l2miss_tag := Mux(state(0)===5.U && state(1) ===0.U, mshr_tag(0), 0.U)
+  alloc_arb_out_ready := io.req.valid && sdq_rdy && cacheable && !idx_match
   /*runahead code end*/
 
   alloc_arb.io.out.ready := io.req.valid && sdq_rdy && cacheable && !idx_match
@@ -863,9 +871,10 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   data.io.write.bits.data := wdata_encoded.asUInt
   /*runahead code begin*/
   io.cpu.mshr_tag := mshrs.io.mshr_tag
+  io.cpu.mshr_cmd := mshrs.io.mshr_cmd
   io.cpu.mshr_addr := mshrs.io.mshr_addr
   io.cpu.mshr_state := mshrs.io.mshr_state
-
+  io.cpu.alloc_arb_out_ready := mshrs.io.alloc_arb_out_ready
   io.cpu.mshr_flag := mshrs.io.mshr_flag
   mshrs.io.runahead_flag := io.cpu.runahead_flag
   /*runahead code end*/
