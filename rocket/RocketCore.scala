@@ -237,6 +237,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ex_rh_load = Reg(Bool())
   val ex_rh_hit = Wire(Bool())
   val ex_dmem_req_inv = Wire(Bool())
+  val ex_hit_ptr = WireInit(0.U(5.W))
   /*runahead code end*/
   val ex_reg_mem_size = Reg(UInt())
   val ex_reg_hls = Reg(Bool())
@@ -264,6 +265,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val mem_rh_load = Reg(Bool())
   val mem_rh_store = Reg(Bool())
   val mem_rh_hit = Reg(Bool())
+  val mem_rh_load_resp = Reg(Bool())
+  val mem_hit_ptr = Reg(Bool())
   /*runahead code end*/
   val mem_reg_inst = Reg(Bits())
   val mem_reg_mem_size = Reg(UInt())
@@ -295,6 +298,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val db_flag = Reg(Bool())
   val s1_db_flag = RegNext(db_flag,init = false.B)
   val exit_miss_back = Wire(Bool())
+  val wb_rh_load_resp = Reg(Bool())
+  val wb_hit_ptr = Reg(Bool())
   /*runahead code end*/
   val wb_reg_mem_size = Reg(UInt())
   val wb_reg_hls_or_dv = Reg(Bool())
@@ -320,7 +325,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val rcu = Module(new RCU(RCU_Params(xLen)))
   val runahead_flag = Wire(Bool())
   val dmem_req_addr = Wire(Bits())
-  val rfinvfile_block_miss =  runahead_flag && dmem_req_addr >= block_addr && dmem_req_addr <= (block_addr + 64.U)
+  val rfinvfile_block_miss =  runahead_flag && dmem_req_addr >= block_addr && dmem_req_addr <= (block_addr + 64.U) && ex_ctrl.mem
   //dontTouch(take_pc)
   dontTouch(runahead_flag)
   /*runahead code end*/
@@ -754,6 +759,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     mem_rh_store := ex_rh_store
     mem_dmem_req_inv := ex_dmem_req_inv
     mem_rh_hit := ex_rh_hit
+    mem_hit_ptr := ex_hit_ptr
+    when((ex_rh_load === true.B) && (runahead_flag === true.B) && (ex_rh_hit === true.B)){//load the data
+      mem_rh_load_resp := true.B
+    }.otherwise{
+      mem_rh_load_resp := false.B
+    }
     /*runahead code end*/
     mem_reg_sfence := ex_sfence
     mem_reg_btb_resp := ex_reg_btb_resp
@@ -841,6 +852,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_load := mem_reg_load
     wb_dmem_req_inv := mem_dmem_req_inv
     wb_rh_hit := mem_rh_hit
+    wb_rh_load_resp := mem_rh_load_resp
+    wb_hit_ptr := mem_hit_ptr
     /*runahead code end*/
     wb_reg_wphit := mem_reg_wphit | bpu.io.bpwatch.map { bpw => (bpw.rvalid(0) && mem_reg_load) || (bpw.wvalid(0) && mem_reg_store) }
   }
@@ -879,18 +892,18 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   take_pc_wb := replay_wb || wb_xcpt || csr.io.eret || wb_reg_flush_pipe
 
   // writeback arbitration
-  /*runahead code begin*/
-  val rh_load_resp = Reg(Bool())
-  /*runahead code end*/
   val dmem_resp_xpu = !io.dmem.resp.bits.tag(0).asBool ||
   /*runahead code begin*/ 
-  (rh_load_resp === true.B)
+  (wb_rh_load_resp === true.B)
   /*runahead code end*/
   val dmem_resp_fpu =  io.dmem.resp.bits.tag(0).asBool
-  val dmem_resp_waddr = io.dmem.resp.bits.tag(5, 1)
+  /*runahead code begin*/
+  //val dmem_resp_waddr = io.dmem.resp.bits.tag(5, 1)
+  val dmem_resp_waddr = Mux(wb_rh_load_resp, wb_waddr, io.dmem.resp.bits.tag(5, 1))
+  /*runahead code end*/
   val dmem_resp_valid = (io.dmem.resp.valid && io.dmem.resp.bits.has_data ||
   /*runahead code begin*/
-  (rh_load_resp === true.B)) && !exit_miss_back
+  (wb_rh_load_resp === true.B)) && !exit_miss_back
   /*runahead code end*/
   val dmem_resp_replay = dmem_resp_valid && io.dmem.resp.bits.replay
 
@@ -936,13 +949,13 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   !(db_flag || s1_db_flag)  //在db_flag和之后的一个cycle不能写回
 
   val rhbuffer_data = RegInit(VecInit(Seq.fill(10)(0.U(64.W))))
-  val hit_ptr = WireInit(0.U(5.W))
+
 
   /*runahead code end*/
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
   val rf_wdata = 
                 /*runahead code begin*/
-                 Mux(dmem_resp_valid && dmem_resp_xpu && (runahead_flag === true.B) && (wb_rh_hit === true.B), rhbuffer_data(hit_ptr),
+                 Mux(dmem_resp_valid && dmem_resp_xpu && (runahead_flag === true.B) && (wb_rh_hit === true.B), rhbuffer_data(wb_hit_ptr),
                 /*runahead code end*/
                  Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
@@ -1104,7 +1117,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
   val s1_reg_reg_io_dmem_req_bits_addr =RegNext(dmem_req_addr)
   val s2_reg_io_dmem_req_bits_addr = RegNext(s1_reg_reg_io_dmem_req_bits_addr)
-  rcu.io.l2miss := runahead_posedge
+  rcu.io.l2miss := runahead_posedge //从检测到发送该l2miss延迟了两个周期（可能在检测阶段有replay）
 
 
   when(runahead_state === s_pass && io.dmem.mshr_state(0) === 0.U/* && io.dmem.mshr_state(1) === 0.U*/) {
@@ -1232,6 +1245,7 @@ when(runahead_posedge) {
 
   sboard.clear((runahead_flag === true.B) && s2_runahead_posedge, runahead_tag(0)(6,2))//pretend stall for dependency
   val rf_invfile = new Scoreboard(32, true)
+  rf_invfile.set((runahead_flag === true.B) && runahead_posedge,id_waddr) //导致进入l2missstall的inst 对应的目标寄存器置无效(可能不是寄存器依赖，是set match依赖)
   rf_invfile.set((runahead_flag === true.B) && s1_runahead_posedge, runahead_tag(0)(6,2))
   val ex_rfinvfile_propogation = checkHazards(rh_hazard_targets, rd => rf_invfile.read(rd) && !id_sboard_clear_bypass(rd))
 
@@ -1271,7 +1285,7 @@ when(runahead_posedge) {
     ((rhbuffer_addr(9) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(9) =/= 0.U)) -> true.B,
   ))
 
-  hit_ptr := MuxCase(0.U,Seq(
+  ex_hit_ptr := MuxCase(0.U,Seq(
     ((rhbuffer_addr(0) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(0) =/= 0.U)) -> 0.U,
     ((rhbuffer_addr(1) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(1) =/= 0.U)) -> 1.U,
     ((rhbuffer_addr(2) === dmem_req_addr) && ((ex_rh_load === true.B) || (ex_rh_store === true.B)) && (rhbuffer_addr(2) =/= 0.U)) -> 2.U,
@@ -1300,18 +1314,13 @@ when(runahead_posedge) {
     wr_ptr := Mux(wr_ptr === 9.U, 0.U, wr_ptr + 1.U)
   }.elsewhen((ex_rh_store === true.B) && (runahead_flag === true.B) && (ex_rh_hit === true.B)){//replace the data
     val size = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_reg_mem_size)
-    rhbuffer_data(hit_ptr) := new StoreGen(size, 0.U, ex_rs(1), coreDataBytes).data
+    rhbuffer_data(ex_hit_ptr) := new StoreGen(size, 0.U, ex_rs(1), coreDataBytes).data
   }
   //invalid addr set and clear
   // addr_invfile.set(runahead_flag && runahead_posedge, runahead_tag(0)(6, 2))
   // addr_invfile.clear(runahead_flag && runahead_posedge, runahead_tag(0)(6, 2))
 
   //load -> send this data to register file
-  when((ex_rh_load === true.B) && (runahead_flag === true.B) && (ex_rh_hit === true.B)){//load the data
-    rh_load_resp := true.B
-  }.otherwise{
-    rh_load_resp := false.B
-  }
 
   //clear data and addr when exit runahead
   when(db_flag){
