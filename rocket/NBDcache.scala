@@ -414,7 +414,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     alloc_arb.io.in(i).valid := mshr.io.req_pri_rdy
     mshr.io.req_pri_val := alloc_arb.io.in(i).ready
 
-    mshr.io.req_sec_val := io.req.valid && sdq_rdy && tag_match
+   mshr.io.req_sec_val := io.req.valid && sdq_rdy && tag_match
     mshr.io.req_bits.viewAsSupertype(new HellaCacheReqInternal) := io.req.bits.viewAsSupertype(new HellaCacheReqInternal)
     mshr.io.req_bits.tag_match := io.req.bits.tag_match
     mshr.io.req_bits.old_meta := io.req.bits.old_meta

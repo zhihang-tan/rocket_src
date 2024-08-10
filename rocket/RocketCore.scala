@@ -949,7 +949,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   !(db_flag || s1_db_flag)  //在db_flag和之后的一个cycle不能写回
 
   val rhbuffer_data = RegInit(VecInit(Seq.fill(10)(0.U(64.W))))
-
+  val rh_loadmiss_resp = Wire(Bool())
 
   /*runahead code end*/
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
@@ -979,9 +979,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
                        io.dmem.resp.bits.tag(5, 1) === runahead_tag(3)(6, 2) && io.dmem.resp.bits.addr === runahead_addr(3) && runahead_l2miss_events(2) === true.B)
   /*runahead code end*/
 
-  when (rf_wen //&&
+  when (rf_wen &&
   /*runahead code begin*/
  // !exit_miss_back
+  !rh_loadmiss_resp
   /*runahead code end*/
   ) { rf.write(rf_waddr, rf_wdata) }
 
@@ -1158,6 +1159,18 @@ when(db_flag && runahead_state === s_pass) {
   }
 }
 
+//not-stall mechanisim
+val mshr_prev_state = RegInit(VecInit(Seq.fill(3)(0.U(4.W))))
+mshr_prev_state(0) := io.dmem.mshr_state(1)
+mshr_prev_state(1) := io.dmem.mshr_state(2)
+mshr_prev_state(2) := io.dmem.mshr_state(3)
+rh_loadmiss_resp := ( (runahead_flag === true.B) && (io.dmem.mshr_state(1) === 0.U) && (mshr_prev_state(0) === 8.U)) ||
+                    ( (runahead_flag === true.B) && (io.dmem.mshr_state(2) === 0.U) && (mshr_prev_state(1) === 8.U)) ||
+                    ( (runahead_flag === true.B) && (io.dmem.mshr_state(3) === 0.U) && (mshr_prev_state(2) === 8.U))
+dontTouch(rh_loadmiss_resp)
+dontTouch(mshr_prev_state)
+//not-stall mechanisim
+
 
 when(runahead_posedge) {
   runahead_tag(0) := mshr_l2miss_tag
@@ -1237,6 +1250,11 @@ when(runahead_posedge) {
   /*runahead invfile beign*/
   val ex_raddr1 = ex_reg_inst(19, 15)
   val ex_raddr2 = ex_reg_inst(24, 20)
+  val rh_miss_tag = RegInit(0.U(5.W))
+  when((runahead_flag === true.B) && wb_dcache_miss && wb_wen){
+    rh_miss_tag := wb_waddr
+  }
+  dontTouch(rh_miss_tag)
   dontTouch(ex_raddr1)
   dontTouch(ex_raddr2)
   dontTouch(ex_waddr)
@@ -1244,9 +1262,11 @@ when(runahead_posedge) {
                               (ex_ctrl.rxs2 && ex_raddr2 =/= 0.U, ex_raddr2))
 
   sboard.clear((runahead_flag === true.B) && s2_runahead_posedge, runahead_tag(0)(6,2))//pretend stall for dependency
+  sboard.clear((runahead_flag === true.B) && (io.dmem.perf.acquire === true.B), rh_miss_tag)//rh过程中，如果发出acquire信号，clear sb，释放流水线
   val rf_invfile = new Scoreboard(32, true)
   rf_invfile.set((runahead_flag === true.B) && runahead_posedge,id_waddr) //导致进入l2missstall的inst 对应的目标寄存器置无效(可能不是寄存器依赖，是set match依赖)
   rf_invfile.set((runahead_flag === true.B) && s1_runahead_posedge, runahead_tag(0)(6,2))
+  rf_invfile.set((runahead_flag === true.B) && wb_dcache_miss, wb_waddr)//if the load miss, the dest is inv. but if the load hit rh_buffer?
   val ex_rfinvfile_propogation = checkHazards(rh_hazard_targets, rd => rf_invfile.read(rd) && !id_sboard_clear_bypass(rd))
 
   rf_invfile.set((runahead_flag === true.B) && ex_rfinvfile_propogation || rfinvfile_block_miss, ex_waddr) //although invalid, it will still writeback to rf
@@ -1391,8 +1411,6 @@ when(runahead_posedge) {
     Mux(db_flag ,rcu.io.opc,
     /*runahead code end*/   
     Mux(replay_wb,              wb_reg_pc,   // replay
-
-
                                 mem_npc)))//)    // flush or branch misprediction
   io.imem.flush_icache := wb_reg_valid && wb_ctrl.fence_i && !io.dmem.s2_nack
   io.imem.might_request := {
