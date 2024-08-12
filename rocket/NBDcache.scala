@@ -358,6 +358,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     val mshr_cmd = Output(Vec(4, Bits(5.W)))
     val mshr_addr = Output(Vec(4, Bits(40.W)))
     val mshr_state = Output(Vec(4, Bits(4.W)))
+    val idx_match = Output(Bool())
     val mshr_flag = Output(Bool())
     val alloc_arb_out_ready = Output(Bool())
     val runahead_flag = Input(Bool())
@@ -451,6 +452,7 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
   }
 
   /*runahead code begin*/
+  io.idx_match := idx_match
   io.mshr_state := state
   io.mshr_tag := mshr_tag
   io.mshr_cmd := mshr_cmd
@@ -874,6 +876,7 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   io.cpu.mshr_cmd := mshrs.io.mshr_cmd
   io.cpu.mshr_addr := mshrs.io.mshr_addr
   io.cpu.mshr_state := mshrs.io.mshr_state
+  io.cpu.idx_match := mshrs.io.idx_match
   io.cpu.alloc_arb_out_ready := mshrs.io.alloc_arb_out_ready
   io.cpu.mshr_flag := mshrs.io.mshr_flag
   mshrs.io.runahead_flag := io.cpu.runahead_flag

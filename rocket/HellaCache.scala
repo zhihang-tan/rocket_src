@@ -188,6 +188,7 @@ class HellaCacheIO(implicit p: Parameters) extends CoreBundle()(p) {
   val mshr_cmd = Input(Vec(4, Bits(5.W)))
   val mshr_addr = Input(Vec(4, Bits(40.W)))
   val mshr_state = Input(Vec(4, Bits(4.W)))
+  val idx_match = Input(Bool())
   val alloc_arb_out_ready = Input(Bool())
   val mshr_flag = Input(Bool())
   val runahead_flag = Output(Bool())
