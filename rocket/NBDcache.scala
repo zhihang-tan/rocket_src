@@ -183,7 +183,8 @@ class MSHR(id: Int)(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCach
   /*runahead code begin*/
   //val idx_match = req_idx === io.req_bits.addr(untagBits-1,blockOffBits)
   dontTouch(io.runahead_flag)
-  val idx_match = Mux(io.runahead_flag,false.B,req_idx === io.req_bits.addr(untagBits-1,blockOffBits))
+  val idx_match = Mux(io.runahead_flag && req_block_addr =/= (io.req_bits.addr >> blockOffBits) << blockOffBits,
+                      false.B,req_idx === io.req_bits.addr(untagBits-1,blockOffBits))
   /*runahead code end*/
 
   val new_coh = RegInit(ClientMetadata.onReset)
@@ -358,6 +359,8 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
     val mshr_cmd = Output(Vec(4, Bits(5.W)))
     val mshr_addr = Output(Vec(4, Bits(40.W)))
     val mshr_state = Output(Vec(4, Bits(4.W)))
+    val mshr_enq_ptr_value = Output(Vec(4, Bits(4.W)))
+    val mshr_deq_ptr_value = Output(Vec(4, Bits(4.W)))
     val idx_match = Output(Bool())
     val mshr_flag = Output(Bool())
     val alloc_arb_out_ready = Output(Bool())
@@ -452,6 +455,8 @@ class MSHRFile(implicit edge: TLEdgeOut, p: Parameters) extends L1HellaCacheModu
   }
 
   /*runahead code begin*/
+  io.mshr_enq_ptr_value := enq_ptr_value
+  io.mshr_deq_ptr_value := deq_ptr_value
   io.idx_match := idx_match
   io.mshr_state := state
   io.mshr_tag := mshr_tag
@@ -876,6 +881,8 @@ class NonBlockingDCacheModule(outer: NonBlockingDCache) extends HellaCacheModule
   io.cpu.mshr_cmd := mshrs.io.mshr_cmd
   io.cpu.mshr_addr := mshrs.io.mshr_addr
   io.cpu.mshr_state := mshrs.io.mshr_state
+  io.cpu.mshr_enq_ptr_value := mshrs.io.mshr_enq_ptr_value
+  io.cpu.mshr_deq_ptr_value := mshrs.io.mshr_deq_ptr_value
   io.cpu.idx_match := mshrs.io.idx_match
   io.cpu.alloc_arb_out_ready := mshrs.io.alloc_arb_out_ready
   io.cpu.mshr_flag := mshrs.io.mshr_flag
